@@ -1,4 +1,4 @@
-# SAFace
+# GRR Face Detection
 Image Grid Recognition and Regression
 
 This repository is under building
