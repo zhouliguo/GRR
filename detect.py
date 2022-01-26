@@ -44,7 +44,7 @@ def detect(model, img, im0s, shapes, opt, flip=False):
 
         pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres)[0].cpu().numpy()
 
-        pred[:, :4] = scale_coords(img.shape[2:], pred[:, :4], im0s.shape, shapes[1])#.round()
+        pred[:, :4] = scale_coords(img.shape[2:], pred[:, :4], im0s.shape, shapes[1])
 
         boxes.append(pred[:, :5])
 
@@ -148,7 +148,7 @@ if __name__ == '__main__':
     parser.add_argument('--image-path', type=str, default='D:/WIDER_FACE/WIDER_train/images/0--Parade/0_Parade_marchingband_1_364.jpg', help='image')  # file/folder, 0 for webcam
     parser.add_argument('--conf-thres', type=float, default=0.001, help='object confidence threshold')
     parser.add_argument('--iou-thres', type=float, default=0.6, help='IOU threshold for NMS')
-    parser.add_argument('--device', default='0', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
+    parser.add_argument('--device', default='cpu', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--half', action='store_true', help='use FP16 half-precision inference')
     opt = parser.parse_args()
     print(opt)

@@ -207,12 +207,11 @@ def multi_scale_test_pyramid(opt, path, stride, max_shrink):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--weights', nargs='+', type=str, default='weights/weight_light.pt', help='model.pt path(s)')
-    #parser.add_argument('--source', type=str, default='D:/DarkFace_Train/2021/val/image/*', help='source')  # file/folder, 0 for webcam
-    parser.add_argument('--source', type=str, default='D:/WIDER_FACE/WIDER_val/images/*/*', help='source')  # file/folder, 0 for webcam
+    parser.add_argument('--source', type=str, default='D:/WIDER_FACE/WIDER_val/images/*/*', help='source')
     parser.add_argument('--conf-thres', type=float, default=0.001, help='object confidence threshold')
     parser.add_argument('--iou-thres', type=float, default=0.6, help='IOU threshold for NMS')
     parser.add_argument('--device', default='0', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
-    parser.add_argument('--save-path', default='D:/WIDER_FACE/val_results/', help='save path')
+    parser.add_argument('--save-path', default='D:/WIDER_FACE/val_results/val_0.33_0.25/', help='save path')
     parser.add_argument('--classes', nargs='+', type=int, help='filter by class: --class 0, or --class 0 2 3')
     parser.add_argument('--agnostic-nms', action='store_true', help='class-agnostic NMS')
     opt = parser.parse_args()
@@ -262,7 +261,7 @@ if __name__ == '__main__':
             preds[:,3] = preds[:,3]-preds[:,1]
 
             path = path.split('\\')
-            path_save = save_path+'val_0.33_0.25/'+path[1]
+            path_save = save_path+path[1]
             if not os.path.exists(path_save):
                 os.makedirs(path_save)
             path_txt = path_save+'/'+path[2][:-3]+'txt'
