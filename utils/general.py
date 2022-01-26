@@ -29,7 +29,6 @@ import torch
 import torchvision
 import yaml
 
-from utils.downloads import gsutil_getsize
 from utils.metrics import box_iou, fitness
 
 # Settings
@@ -748,45 +747,6 @@ def strip_optimizer(f='best.pt', s=''):  # from utils.general import *; strip_op
     torch.save(x, s or f)
     mb = os.path.getsize(s or f) / 1E6  # filesize
     print(f"Optimizer stripped from {f},{(' saved as %s,' % s) if s else ''} {mb:.1f}MB")
-
-
-def print_mutation(results, hyp, save_dir, bucket):
-    evolve_csv, results_csv, evolve_yaml = save_dir / 'evolve.csv', save_dir / 'results.csv', save_dir / 'hyp_evolve.yaml'
-    keys = ('metrics/precision', 'metrics/recall', 'metrics/mAP_0.5', 'metrics/mAP_0.5:0.95',
-            'val/box_loss', 'val/obj_loss', 'val/cls_loss') + tuple(hyp.keys())  # [results + hyps]
-    keys = tuple(x.strip() for x in keys)
-    vals = results + tuple(hyp.values())
-    n = len(keys)
-
-    # Download (optional)
-    if bucket:
-        url = f'gs://{bucket}/evolve.csv'
-        if gsutil_getsize(url) > (os.path.getsize(evolve_csv) if os.path.exists(evolve_csv) else 0):
-            os.system(f'gsutil cp {url} {save_dir}')  # download evolve.csv if larger than local
-
-    # Log to evolve.csv
-    s = '' if evolve_csv.exists() else (('%20s,' * n % keys).rstrip(',') + '\n')  # add header
-    with open(evolve_csv, 'a') as f:
-        f.write(s + ('%20.5g,' * n % vals).rstrip(',') + '\n')
-
-    # Print to screen
-    print(colorstr('evolve: ') + ', '.join(f'{x.strip():>20s}' for x in keys))
-    print(colorstr('evolve: ') + ', '.join(f'{x:20.5g}' for x in vals), end='\n\n\n')
-
-    # Save yaml
-    with open(evolve_yaml, 'w') as f:
-        data = pd.read_csv(evolve_csv)
-        data = data.rename(columns=lambda x: x.strip())  # strip keys
-        i = np.argmax(fitness(data.values[:, :7]))  #
-        f.write('# YOLOv5 Hyperparameter Evolution Results\n' +
-                f'# Best generation: {i}\n' +
-                f'# Last generation: {len(data) - 1}\n' +
-                '# ' + ', '.join(f'{x.strip():>20s}' for x in keys[:7]) + '\n' +
-                '# ' + ', '.join(f'{x:>20.5g}' for x in data.values[i, :7]) + '\n\n')
-        yaml.safe_dump(hyp, f, sort_keys=False)
-
-    if bucket:
-        os.system(f'gsutil cp {evolve_csv} {evolve_yaml} gs://{bucket}')  # upload
 
 
 def apply_classifier(x, model, img, im0):

@@ -55,7 +55,7 @@ def git_describe(path=Path(__file__).parent):  # path must be a directory
 
 def select_device(device='', batch_size=0, newline=True):
     # device = 'cpu' or '0' or '0,1,2,3'
-    s = f'YOLOv5 🚀 {git_describe() or date_modified()} torch {torch.__version__} '  # string
+    s = f'{git_describe() or date_modified()} torch {torch.__version__} '  # string
     device = str(device).strip().lower().replace('cuda:', '')  # to string, 'cuda:0' to '0'
     cpu = device == 'cpu'
     if cpu:
@@ -211,7 +211,7 @@ def fuse_conv_and_bn(conv, bn):
 
     return fusedconv
 
-
+'''
 def model_info(model, verbose=False, img_size=640):
     # Model information. img_size may be int or list, i.e. img_size=640 or img_size=[640, 320]
     n_p = sum(x.numel() for x in model.parameters())  # number parameters
@@ -234,7 +234,7 @@ def model_info(model, verbose=False, img_size=640):
         fs = ''
 
     LOGGER.info(f"Model Summary: {len(list(model.modules()))} layers, {n_p} parameters, {n_g} gradients{fs}")
-
+'''
 
 def scale_img(img, ratio=1.0, same_shape=False, gs=32):  # img(16,3,256,416)
     # scales img(bs,3,y,x) by ratio constrained to gs-multiple

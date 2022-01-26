@@ -1,18 +1,10 @@
-# YOLOv5 🚀 by Ultralytics, GPL-3.0 license
-"""
-YOLO-specific modules
-
-Usage:
-    $ python path/to/models/yolo.py --cfg yolov5s.yaml
-"""
-
 import argparse
 import sys
 from copy import deepcopy
 from pathlib import Path
 
 FILE = Path(__file__).resolve()
-ROOT = FILE.parents[1]  # YOLOv5 root directory
+ROOT = FILE.parents[1]  # root directory
 if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))  # add ROOT to PATH
 # ROOT = ROOT.relative_to(Path.cwd())  # relative
@@ -22,7 +14,7 @@ from models.experimental import *
 from utils.autoanchor import check_anchor_order
 from utils.general import LOGGER, check_version, check_yaml, make_divisible, print_args
 from utils.plots import feature_visualization
-from utils.torch_utils import fuse_conv_and_bn, initialize_weights, model_info, scale_img, select_device, time_sync
+from utils.torch_utils import fuse_conv_and_bn, initialize_weights, scale_img, select_device, time_sync
 
 try:
     import thop  # for FLOPs computation
@@ -60,14 +52,10 @@ class Detect(nn.Module):
                 y = x[i].sigmoid()
                 if self.inplace:
                     y[..., 0:2] = (y[..., 0:2] * 2 - 0.5 + self.grid[i]) * self.stride[i]  # xy
-                    #y[..., 2:4] = (y[..., 2:4] * 2) ** 2 * self.anchor_grid[i]  # wh
-                    #y[..., 2:4] = torch.pow(self.anchors[i], y[..., 2:4] * 1.5+0.5)
-                    #for j in range(self.na):
-                    #    y[:,j,:,:, 2:4] = torch.pow(self.anchors[i][j], y[:,j,:,:, 2:4] + 1)
-                    y[..., 2:4] = torch.pow(self.anchors[i], y[..., 2:4] + 1)
-                else:  # for YOLOv5 on AWS Inferentia https://github.com/ultralytics/yolov5/pull/2953
+                    y[..., 2:4] = torch.pow(self.anchors[i], y[..., 2:4] + 1)   #wh
+                else: 
                     xy = (y[..., 0:2] * 2 - 0.5 + self.grid[i]) * self.stride[i]  # xy
-                    wh = (y[..., 2:4] * 2) ** 2 * self.anchor_grid[i]  # wh
+                    wh = torch.pow(self.anchors[i], y[..., 2:4] + 1)   #wh
                     y = torch.cat((xy, wh, y[..., 4:]), -1)
                 z.append(y.view(bs, -1, self.no))
 
@@ -123,8 +111,6 @@ class Model(nn.Module):
 
         # Init weights, biases
         initialize_weights(self)
-        self.info()
-        LOGGER.info('')
 
     def forward(self, x, augment=False, profile=False, visualize=False):
         if augment:
@@ -222,17 +208,12 @@ class Model(nn.Module):
     #             LOGGER.info('%10.3g' % (m.w.detach().sigmoid() * 2))  # shortcut weights
 
     def fuse(self):  # fuse model Conv2d() + BatchNorm2d() layers
-        LOGGER.info('Fusing layers... ')
         for m in self.model.modules():
             if isinstance(m, (Conv, DWConv)) and hasattr(m, 'bn'):
                 m.conv = fuse_conv_and_bn(m.conv, m.bn)  # update conv
                 delattr(m, 'bn')  # remove batchnorm
                 m.forward = m.forward_fuse  # update forward
-        self.info()
         return self
-
-    def info(self, verbose=False, img_size=640):  # print model information
-        model_info(self, verbose, img_size)
 
     def _apply(self, fn):
         # Apply to(), cpu(), cuda(), half() to model tensors that are not parameters or registered buffers

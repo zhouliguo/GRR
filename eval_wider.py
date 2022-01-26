@@ -23,9 +23,14 @@ def detect(model, img, im0s, opt, flip=False):
         img = img.unsqueeze(0)
 
     # Inference
-    pred = model(img, augment=opt.augment)[0]
+    pred = model(img)[0]
+
+    if flip:
+        pred[:,:,0] = img.shape[3] - pred[:,:,0]
+
     length = pred.shape[1]
     size_min = int(length/85)
+
     pred1=[]
     pred1.append(pred[:,0:size_min*64])
     pred1.append(pred[:,size_min*64:size_min*80])
@@ -34,9 +39,6 @@ def detect(model, img, im0s, opt, flip=False):
 
     boxes=[]
     for j, pred in enumerate(pred1):
-        #low=2**(j+1)
-        #index = (pred[0,:,2]>=low) & (pred[0,:,3]>=low)
-        #pred = pred[0,index].unsqueeze(0)
         # Apply NMS
         pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres, classes=opt.classes, agnostic=opt.agnostic_nms)[0].cpu().numpy()
 
@@ -204,20 +206,20 @@ def multi_scale_test_pyramid(opt, path, stride, max_shrink):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--weights', nargs='+', type=str, default='C:/Users/zhouliguo/Desktop/best.pt', help='model.pt path(s)')
+    parser.add_argument('--weights', nargs='+', type=str, default='weights/weight_light.pt', help='model.pt path(s)')
     #parser.add_argument('--source', type=str, default='D:/DarkFace_Train/2021/val/image/*', help='source')  # file/folder, 0 for webcam
     parser.add_argument('--source', type=str, default='D:/WIDER_FACE/WIDER_val/images/*/*', help='source')  # file/folder, 0 for webcam
     parser.add_argument('--conf-thres', type=float, default=0.001, help='object confidence threshold')
     parser.add_argument('--iou-thres', type=float, default=0.6, help='IOU threshold for NMS')
     parser.add_argument('--device', default='0', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
-    parser.add_argument('--augment', default=False, help='augmented inference')
+    parser.add_argument('--save-path', default='D:/WIDER_FACE/val_results/', help='save path')
     parser.add_argument('--classes', nargs='+', type=int, help='filter by class: --class 0, or --class 0 2 3')
     parser.add_argument('--agnostic-nms', action='store_true', help='class-agnostic NMS')
     opt = parser.parse_args()
     print(opt)
     #check_requirements(exclude=('tensorboard', 'pycocotools', 'thop'))
 
-    source, weights = opt.source, opt.weights
+    source, weights, save_path = opt.source, opt.weights, opt.save_path
 
     # Initialize
     set_logging()
@@ -236,26 +238,23 @@ if __name__ == '__main__':
 
     paths = sorted(glob.glob(opt.source, recursive=True))
 
-    root_save = 'D:/WIDER_FACE/val_results/'
     for img_num, path in enumerate(paths):
-        #path = 'D:/WIDER_FACE/WIDER_val/image/2--Demonstration/2_Demonstration_Demonstration_Or_Protest_2_58.jpg'
         print(img_num, path)
         img = cv2.imread(path)
         max_im_shrink = (0x7fffffff / 200.0 / (img.shape[0] * img.shape[1])) ** 0.5 # the max size of input image for caffe
         max_im_shrink = 3 if max_im_shrink > 3 else max_im_shrink
+
         with torch.no_grad():
             img, img0 = load_image(path, stride)
             pred0 = detect(model, img, img0, opt)
             
-            '''
-            img, img0 = load_image(path, stride, True)
-            pred1 = detect(model, img, img0, opt, True)
+            #img, img0 = load_image(path, stride, True)
+            #pred1 = detect(model, img, img0, opt, True)
 
+            #pred2, pred3 = multi_scale_test(opt, path, stride, max_im_shrink)
+            #pred4 = multi_scale_test_pyramid(opt, path, stride, max_im_shrink)
             
-            pred2, pred3 = multi_scale_test(opt, path, stride, max_im_shrink)
-            pred4 = multi_scale_test_pyramid(opt, path, stride, max_im_shrink)
-            '''
-            preds = np.r_[pred0]#, pred1, pred2, pred3, pred4]
+            preds = pred0#np.r_[pred0, pred1, pred2, pred3, pred4]
             
             preds = bbox_vote(preds)
 
@@ -263,10 +262,9 @@ if __name__ == '__main__':
             preds[:,3] = preds[:,3]-preds[:,1]
 
             path = path.split('\\')
-            path_save = root_save+'wider_val/'+path[1]
+            path_save = save_path+'val_0.33_0.25/'+path[1]
             if not os.path.exists(path_save):
                 os.makedirs(path_save)
             path_txt = path_save+'/'+path[2][:-3]+'txt'
-            #path_txt = 'dark1/'+path[1][:-3]+'txt'
             write_txt(path_txt, preds)
             

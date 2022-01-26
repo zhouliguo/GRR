@@ -276,7 +276,7 @@ class Concat(nn.Module):
 
 class DetectMultiBackend(nn.Module):
     # YOLOv5 MultiBackend class for python inference on various backends
-    def __init__(self, weights='yolov5s.pt', device=None, dnn=False):
+    def __init__(self, weights='best.pt', device=None, dnn=False):
         # Usage:
         #   PyTorch:      weights = *.pt
         #   TorchScript:            *.torchscript
@@ -287,7 +287,7 @@ class DetectMultiBackend(nn.Module):
         #   ONNX Runtime:           *.onnx
         #   OpenCV DNN:             *.onnx with dnn=True
         #   TensorRT:               *.engine
-        from models.experimental import attempt_download, attempt_load  # scoped to avoid circular import
+        from models.experimental import attempt_load  # scoped to avoid circular import
 
         super().__init__()
         w = str(weights[0] if isinstance(weights, list) else weights)
@@ -296,7 +296,6 @@ class DetectMultiBackend(nn.Module):
         check_suffix(w, suffixes)  # check weights have acceptable suffix
         pt, jit, onnx, engine, tflite, pb, saved_model, coreml = (suffix == x for x in suffixes)  # backend booleans
         stride, names = 64, [f'class{i}' for i in range(1000)]  # assign defaults
-        attempt_download(w)  # download if not local
 
         if jit:  # TorchScript
             LOGGER.info(f'Loading {w} for TorchScript inference...')

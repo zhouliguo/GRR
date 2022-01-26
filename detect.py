@@ -144,7 +144,7 @@ def bbox_vote(det):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--weights', nargs='+', type=str, default='D:/best-val1.33-1.pt', help='model.pt path(s)')
+    parser.add_argument('--weights', nargs='+', type=str, default='weights/weight_light.pt', help='model.pt path(s)')
     parser.add_argument('--image-path', type=str, default='D:/WIDER_FACE/WIDER_train/images/0--Parade/0_Parade_marchingband_1_364.jpg', help='image')  # file/folder, 0 for webcam
     parser.add_argument('--conf-thres', type=float, default=0.001, help='object confidence threshold')
     parser.add_argument('--iou-thres', type=float, default=0.6, help='IOU threshold for NMS')
@@ -177,7 +177,7 @@ if __name__ == '__main__':
         for pred in preds:
             if pred[4]>=0.5:
                 cv2.rectangle(img0, (pred[0], pred[1]), (pred[2], pred[3]), (0,255,0), 2)
-        cv2.imwrite('widerimage.png', img0)
+        #cv2.imwrite('widerimage.png', img0)
         cv2.imshow('image', img0)
         cv2.waitKey()
 
