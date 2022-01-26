@@ -8,14 +8,11 @@ import glob
 import cv2
 import time
 import torch
-import torch.backends.cudnn as cudnn
 
 from models.experimental import attempt_load
-from utils.datasets import letterbox, LoadImages
-from utils.general import check_img_size, check_requirements, check_imshow, non_max_suppression, apply_classifier, \
-    scale_coords, xyxy2xywh, strip_optimizer, set_logging, increment_path, save_one_box
-from utils.plots import colors, plot_one_box
-from utils.torch_utils import select_device, load_classifier, time_synchronized
+from utils.datasets import letterbox
+from utils.general import check_img_size, non_max_suppression, scale_coords, set_logging
+from utils.torch_utils import select_device
 
 
 def detect(model, img, im0s, opt, flip=False):
@@ -41,37 +38,12 @@ def detect(model, img, im0s, opt, flip=False):
         #index = (pred[0,:,2]>=low) & (pred[0,:,3]>=low)
         #pred = pred[0,index].unsqueeze(0)
         # Apply NMS
-        pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres, classes=opt.classes, agnostic=opt.agnostic_nms)
+        pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres, classes=opt.classes, agnostic=opt.agnostic_nms)[0].cpu().numpy()
 
-        # Process detections
-        lines = []
-        for i, det in enumerate(pred):  # detections per image
-            p, s, im0 = path, '', im0s.copy()
+        pred[:, :4] = scale_coords(img.shape[2:], pred[:, :4], im0s.shape)
 
-            p = Path(p)  # to Path
-            s += '%gx%g ' % img.shape[2:]  # print string
-            gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
-            if len(det):
-                # Rescale boxes from img_size to im0 size
-                det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
+        boxes.append(pred[:, :5])
 
-                # Write results
-                #for *xyxy, conf, cls in reversed(det):
-                for *xyxy, conf, cls in det:
-                    xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
-                    lines.append((int(cls.cpu()), *xywh, float(conf.cpu())))
-        if len(lines)==0:
-            continue
-            #lines.append(np.array([[0,0,0,0,0.001]]))
-        lines = np.array(lines)[:,1:]
-        if flip:
-            lines[:,0] = 1- lines[:,0]
-        lines = decode(lines, img0.shape[1], img0.shape[0])
-        w = lines[:,2]-lines[:,0]
-        h = lines[:,3]-lines[:,1]
-        #up=(2**(j+2))**2
-
-        boxes.append(lines)
     if len(boxes)==0:
         return np.array([[0,0,0,0,0.001]])
     return np.concatenate(boxes)
@@ -127,6 +99,9 @@ def write_txt(path, preds):
     f.close()
 
 def bbox_vote(det):
+    zero_index = np.where((det[:,2] <= det[:,0]) | (det[:,3] <= det[:,1]))[0]
+    det = np.delete(det, zero_index, 0)
+
     order = det[:, 4].ravel().argsort()[::-1]
     det = det[order, :]
     dets = np.zeros((0, 5),dtype=np.float32)
@@ -229,7 +204,7 @@ def multi_scale_test_pyramid(opt, path, stride, max_shrink):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--weights', nargs='+', type=str, default='best.pt', help='model.pt path(s)')
+    parser.add_argument('--weights', nargs='+', type=str, default='C:/Users/zhouliguo/Desktop/best.pt', help='model.pt path(s)')
     #parser.add_argument('--source', type=str, default='D:/DarkFace_Train/2021/val/image/*', help='source')  # file/folder, 0 for webcam
     parser.add_argument('--source', type=str, default='D:/WIDER_FACE/WIDER_val/images/*/*', help='source')  # file/folder, 0 for webcam
     parser.add_argument('--conf-thres', type=float, default=0.001, help='object confidence threshold')
@@ -261,6 +236,7 @@ if __name__ == '__main__':
 
     paths = sorted(glob.glob(opt.source, recursive=True))
 
+    root_save = 'D:/WIDER_FACE/val_results/'
     for img_num, path in enumerate(paths):
         #path = 'D:/WIDER_FACE/WIDER_val/image/2--Demonstration/2_Demonstration_Demonstration_Or_Protest_2_58.jpg'
         print(img_num, path)
@@ -271,26 +247,26 @@ if __name__ == '__main__':
             img, img0 = load_image(path, stride)
             pred0 = detect(model, img, img0, opt)
             
+            '''
             img, img0 = load_image(path, stride, True)
             pred1 = detect(model, img, img0, opt, True)
 
+            
             pred2, pred3 = multi_scale_test(opt, path, stride, max_im_shrink)
             pred4 = multi_scale_test_pyramid(opt, path, stride, max_im_shrink)
+            '''
+            preds = np.r_[pred0]#, pred1, pred2, pred3, pred4]
             
-            preds = np.r_[pred0, pred1, pred2, pred3, pred4]
-            
-            zero_index = np.where((preds[:,2] == 0) | (preds[:,3] == 0))[0]
-            preds = np.delete(preds, zero_index, 0)
-
             preds = bbox_vote(preds)
 
             preds[:,2] = preds[:,2]-preds[:,0]
             preds[:,3] = preds[:,3]-preds[:,1]
 
             path = path.split('\\')
-            if not os.path.exists('wider_val/'+path[1]):
-                os.makedirs('wider_val/'+path[1])
-            path_txt = 'wider_val/'+path[1]+'/'+path[2][:-3]+'txt'
+            path_save = root_save+'wider_val/'+path[1]
+            if not os.path.exists(path_save):
+                os.makedirs(path_save)
+            path_txt = path_save+'/'+path[2][:-3]+'txt'
             #path_txt = 'dark1/'+path[1][:-3]+'txt'
             write_txt(path_txt, preds)
             
