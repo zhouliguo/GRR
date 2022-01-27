@@ -135,6 +135,7 @@ if __name__ == '__main__':
 
         for pred in preds:
             if pred[4]>=0.5:
+                pred = np.round(pred).astype(np.int32)
                 cv2.rectangle(img0, (pred[0], pred[1]), (pred[2], pred[3]), (0,255,0), 2)
         #cv2.imwrite('widerimage.png', img0)
         cv2.imshow('image', img0)

@@ -51,8 +51,7 @@ class Detect(nn.Module):
                 y = x[i].sigmoid()
                 if self.inplace:
                     y[..., 0:2] = (y[..., 0:2] * 2 - 0.5 + self.grid[i]) * self.stride[i]  # xy
-                    #y[..., 2:4] = torch.pow(self.anchors[i], y[..., 2:4] + 1)   #wh
-                    y[..., 2:4] = torch.pow(self.anchors[i], y[..., 2:4]*1.5 + 0.5)   #wh
+                    y[..., 2:4] = torch.pow(self.anchors[i], y[..., 2:4] + 1)   #wh
                 else: 
                     xy = (y[..., 0:2] * 2 - 0.5 + self.grid[i]) * self.stride[i]  # xy
                     wh = torch.pow(self.anchors[i], y[..., 2:4] + 1)   #wh

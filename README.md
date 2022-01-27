@@ -7,8 +7,6 @@ This repository is under building
 
 Model: https://drive.google.com/file/d/1CdAYQFW93naWBTLBsD9vy8oZXJ5SKpr3/view?usp=sharing
 
-Light Model for Non-CUDA device: https://github.com/zhouliguo/GRR/blob/main/weights/torchscript_lightmodel.pt
-
 ## Test
 ### Evaluate WIDER FACE
 1. Modify the input path, output path and model path in eval.py

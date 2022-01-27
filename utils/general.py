@@ -1,4 +1,3 @@
-# YOLOv5 🚀 by Ultralytics, GPL-3.0 license
 """
 General utils
 """
@@ -560,7 +559,7 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, classes=Non
     time_limit = 10.0  # seconds to quit after
     redundant = True  # require redundant detections
     multi_label &= nc > 1  # multiple labels per box (adds 0.5ms/img)
-    merge = False  # use merge-NMS
+    merge = True  # use merge-NMS
 
     t = time.time()
     output = [torch.zeros((0, 6), device=prediction.device)] * prediction.shape[0]
