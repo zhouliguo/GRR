@@ -18,7 +18,6 @@ import urllib
 from itertools import repeat
 from multiprocessing.pool import ThreadPool
 from pathlib import Path
-from subprocess import check_output
 from zipfile import ZipFile
 
 import cv2
@@ -29,7 +28,7 @@ import torch
 import torchvision
 import yaml
 
-from utils.metrics import box_iou, fitness
+from utils.metrics import box_iou
 
 # Settings
 FILE = Path(__file__).resolve()
@@ -93,22 +92,6 @@ class WorkingDirectory(contextlib.ContextDecorator):
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         os.chdir(self.cwd)
-
-
-def try_except(func):
-    # try-except function. Usage: @try_except decorator
-    def handler(*args, **kwargs):
-        try:
-            func(*args, **kwargs)
-        except Exception as e:
-            print(e)
-
-    return handler
-
-
-def methods(instance):
-    # Get class/instance methods
-    return [f for f in dir(instance) if callable(getattr(instance, f)) and not f.startswith("__")]
 
 
 def print_args(name, opt):
@@ -209,89 +192,6 @@ def file_size(path):
         return sum(f.stat().st_size for f in path.glob('**/*') if f.is_file()) / 1E6
     else:
         return 0.0
-
-
-def check_online():
-    # Check internet connectivity
-    import socket
-    try:
-        socket.create_connection(("1.1.1.1", 443), 5)  # check host accessibility
-        return True
-    except OSError:
-        return False
-
-
-@try_except
-@WorkingDirectory(ROOT)
-def check_git_status():
-    # Recommend 'git pull' if code is out of date
-    msg = ', for updates see https://github.com/ultralytics/yolov5'
-    print(colorstr('github: '), end='')
-    assert Path('.git').exists(), 'skipping check (not a git repository)' + msg
-    assert not is_docker(), 'skipping check (Docker image)' + msg
-    assert check_online(), 'skipping check (offline)' + msg
-
-    cmd = 'git fetch && git config --get remote.origin.url'
-    url = check_output(cmd, shell=True, timeout=5).decode().strip().rstrip('.git')  # git fetch
-    branch = check_output('git rev-parse --abbrev-ref HEAD', shell=True).decode().strip()  # checked out
-    n = int(check_output(f'git rev-list {branch}..origin/master --count', shell=True))  # commits behind
-    if n > 0:
-        s = f"⚠️ YOLOv5 is out of date by {n} commit{'s' * (n > 1)}. Use `git pull` or `git clone {url}` to update."
-    else:
-        s = f'up to date with {url} ✅'
-    print(emojis(s))  # emoji-safe
-
-
-def check_python(minimum='3.6.2'):
-    # Check current python version vs. required python version
-    check_version(platform.python_version(), minimum, name='Python ', hard=True)
-
-
-def check_version(current='0.0.0', minimum='0.0.0', name='version ', pinned=False, hard=False):
-    # Check version vs. required version
-    current, minimum = (pkg.parse_version(x) for x in (current, minimum))
-    result = (current == minimum) if pinned else (current >= minimum)  # bool
-    if hard:  # assert min requirements met
-        assert result, f'{name}{minimum} required by YOLOv5, but {name}{current} is currently installed'
-    else:
-        return result
-
-
-@try_except
-def check_requirements(requirements=ROOT / 'requirements.txt', exclude=(), install=True):
-    # Check installed dependencies meet requirements (pass *.txt file or list of packages)
-    prefix = colorstr('red', 'bold', 'requirements:')
-    check_python()  # check python version
-    if isinstance(requirements, (str, Path)):  # requirements.txt file
-        file = Path(requirements)
-        assert file.exists(), f"{prefix} {file.resolve()} not found, check failed."
-        with file.open() as f:
-            requirements = [f'{x.name}{x.specifier}' for x in pkg.parse_requirements(f) if x.name not in exclude]
-    else:  # list or tuple of packages
-        requirements = [x for x in requirements if x not in exclude]
-
-    n = 0  # number of packages updates
-    for r in requirements:
-        try:
-            pkg.require(r)
-        except Exception as e:  # DistributionNotFound or VersionConflict if requirements not met
-            s = f"{prefix} {r} not found and is required by YOLOv5"
-            if install:
-                print(f"{s}, attempting auto-update...")
-                try:
-                    assert check_online(), f"'pip install {r}' skipped (offline)"
-                    print(check_output(f"pip install '{r}'", shell=True).decode())
-                    n += 1
-                except Exception as e:
-                    print(f'{prefix} {e}')
-            else:
-                print(f'{s}. Please install and rerun your command.')
-
-    if n:  # if packages updated
-        source = file.resolve() if 'file' in locals() else requirements
-        s = f"{prefix} {n} package{'s' * (n > 1)} updated per {source}\n" \
-            f"{prefix} ⚠️ {colorstr('bold', 'Restart runtime or rerun command for updates to take effect')}\n"
-        print(emojis(s))
 
 
 def check_img_size(imgsz, s=32, floor=0):

@@ -196,7 +196,6 @@ if __name__ == '__main__':
 
     opt = parser.parse_args()
     print(opt)
-    #check_requirements(exclude=('tensorboard', 'pycocotools', 'thop'))
 
     source, weights, save_path, multi_scale = opt.source, opt.weights, opt.save_path, opt.multi_scale
 

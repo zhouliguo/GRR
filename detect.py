@@ -7,7 +7,7 @@ import torch
 
 from models.experimental import attempt_load
 from utils.datasets import letterbox
-from utils.general import check_img_size, check_requirements, non_max_suppression, scale_coords
+from utils.general import check_img_size, non_max_suppression, scale_coords
 from utils.torch_utils import select_device
 
 
@@ -112,7 +112,6 @@ if __name__ == '__main__':
     parser.add_argument('--half', action='store_true', help='use FP16 half-precision inference')
     opt = parser.parse_args()
     print(opt)
-    check_requirements(exclude=('tensorboard', 'pycocotools', 'thop'))
 
     weights, image_path = opt.weights, opt.image_path
 

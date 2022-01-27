@@ -9,18 +9,17 @@ import random
 import cv2
 import numpy as np
 
-from utils.general import LOGGER, check_version, colorstr, resample_segments, segment2box
+from utils.general import LOGGER, colorstr, resample_segments, segment2box
 from utils.metrics import bbox_ioa
 
 
 class Albumentations:
-    # YOLOv5 Albumentations class (optional, only used if package is installed)
+    # Albumentations class (optional, only used if package is installed)
     def __init__(self):
         self.transform = None
         try:
             import albumentations as A
-            check_version(A.__version__, '1.0.3', hard=True)  # version requirement
-
+            
             self.transform = A.Compose([
                 A.Blur(p=0.01),
                 A.MedianBlur(p=0.01),
