@@ -1,6 +1,5 @@
 import argparse
 import time
-from pathlib import Path
 
 import os
 import numpy as np
@@ -17,7 +16,7 @@ from utils.torch_utils import select_device
 
 def detect(model, img, im0s, opt, flip=False):
     img = torch.from_numpy(img).to(device)
-    img = img.half() if half else img.float()  # uint8 to fp16/32
+    img = img.half() if opt.half else img.float()  # uint8 to fp16/32
     img /= 255.0  # 0 - 255 to 0.0 - 1.0
     if img.ndimension() == 3:
         img = img.unsqueeze(0)
@@ -40,7 +39,7 @@ def detect(model, img, im0s, opt, flip=False):
     boxes=[]
     for j, pred in enumerate(pred1):
         # Apply NMS
-        pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres, classes=opt.classes, agnostic=opt.agnostic_nms)[0].cpu().numpy()
+        pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres)[0].cpu().numpy()
 
         pred[:, :4] = scale_coords(img.shape[2:], pred[:, :4], im0s.shape)
 
@@ -54,7 +53,7 @@ def load_image(path, stride, flip=False, shrink=1):
     # Read image
     img0 = cv2.imread(path)  # BGR
     img_size = max(img0.shape[:2])
-    img_size = img_size*shrink
+    img_size = int(np.round(img_size*shrink))
     img_size = check_img_size(img_size, s=stride)
     if flip:
         img0 = cv2.flip(img0,1)
@@ -68,26 +67,6 @@ def load_image(path, stride, flip=False, shrink=1):
     img = np.ascontiguousarray(img)
 
     return img, img0
-
-def decode(preds, w, h):
-    for i in range(len(preds)):
-        box = preds[i]
-        box[0] = box[0]*w
-        box[1] = box[1]*h
-        box[2] = box[2]*w
-        box[3] = box[3]*h
-
-        box[0] = box[0]-box[2]/2
-        box[1] = box[1]-box[3]/2
-        box[2] = box[0]+box[2]
-        box[3] = box[1]+box[3]
-        box[box<0] = 0
-        if box[2]<=box[0]:
-            box[2] = box[0]+1
-        if box[3]<=box[1]:
-            box[3] = box[1]+1
-        preds[i] = box
-    return preds
 
 def write_txt(path, preds):
     f = open(path, 'w')
@@ -206,64 +185,68 @@ def multi_scale_test_pyramid(opt, path, stride, max_shrink):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--weights', nargs='+', type=str, default='weights/weight_light.pt', help='model.pt path(s)')
-    parser.add_argument('--source', type=str, default='D:/WIDER_FACE/WIDER_val/images/*/*', help='source')
+    parser.add_argument('--weights', nargs='+', type=str, default='D:/best-val1.33-1.pt', help='model.pt path(s)')
+    parser.add_argument('--source', type=str, default='D:/WIDER_FACE/WIDER_val/images/', help='source')
     parser.add_argument('--conf-thres', type=float, default=0.001, help='object confidence threshold')
     parser.add_argument('--iou-thres', type=float, default=0.6, help='IOU threshold for NMS')
-    parser.add_argument('--device', default='0', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
-    parser.add_argument('--save-path', default='D:/WIDER_FACE/val_results/val_0.33_0.25/', help='save path')
-    parser.add_argument('--classes', nargs='+', type=int, help='filter by class: --class 0, or --class 0 2 3')
-    parser.add_argument('--agnostic-nms', action='store_true', help='class-agnostic NMS')
+    parser.add_argument('--device', default='1', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
+    parser.add_argument('--save-path', default='D:/WIDER_FACE/val_results/val1.33-1/', help='save path')
+    parser.add_argument('--half', action='store_true', help='use FP16 half-precision inference')
+    parser.add_argument('--multi-scale', default=True, help='multi_scale_test')
+
     opt = parser.parse_args()
     print(opt)
     #check_requirements(exclude=('tensorboard', 'pycocotools', 'thop'))
 
-    source, weights, save_path = opt.source, opt.weights, opt.save_path
+    source, weights, save_path, multi_scale = opt.source, opt.weights, opt.save_path, opt.multi_scale
 
     # Initialize
     set_logging()
     device = select_device(opt.device)
-    half = device.type != 'cpu'  # half precision only supported on CUDA
 
     # Load model
     model = attempt_load(weights, map_location=device)  # load FP32 model
     stride = int(model.stride.max())  # model stride
-    if half:
+    if opt.half:
         model.half()  # to FP16
 
     # Run inference
     if device.type != 'cpu':
         model(torch.zeros(1, 3, 32, 32).to(device).type_as(next(model.parameters())))  # run once
 
-    paths = sorted(glob.glob(opt.source, recursive=True))
+    events = os.listdir(opt.source)
 
-    for img_num, path in enumerate(paths):
-        print(img_num, path)
-        img = cv2.imread(path)
-        max_im_shrink = (0x7fffffff / 200.0 / (img.shape[0] * img.shape[1])) ** 0.5 # the max size of input image for caffe
-        max_im_shrink = 3 if max_im_shrink > 3 else max_im_shrink
+    for event in events:
+        paths = sorted(glob.glob(opt.source+event+'/*', recursive=True))
 
-        with torch.no_grad():
-            img, img0 = load_image(path, stride)
-            pred0 = detect(model, img, img0, opt)
-            
-            #img, img0 = load_image(path, stride, True)
-            #pred1 = detect(model, img, img0, opt, True)
+        for img_num, path in enumerate(paths):
+            print(event, img_num, path)
+            img = cv2.imread(path)
+            max_im_shrink = (0x7fffffff / 200.0 / (img.shape[0] * img.shape[1])) ** 0.5 # the max size of input image for caffe
+            max_im_shrink = 3 if max_im_shrink > 3 else max_im_shrink
 
-            #pred2, pred3 = multi_scale_test(opt, path, stride, max_im_shrink)
-            #pred4 = multi_scale_test_pyramid(opt, path, stride, max_im_shrink)
-            
-            preds = pred0#np.r_[pred0, pred1, pred2, pred3, pred4]
-            
-            preds = bbox_vote(preds)
+            with torch.no_grad():
+                img, img0 = load_image(path, stride)
+                preds = detect(model, img, img0, opt)
+                
+                if multi_scale:
+                    img, img0 = load_image(path, stride, True)
+                    preds1 = detect(model, img, img0, opt, True)
 
-            preds[:,2] = preds[:,2]-preds[:,0]
-            preds[:,3] = preds[:,3]-preds[:,1]
+                    preds2, preds3 = multi_scale_test(opt, path, stride, max_im_shrink)
+                    preds4 = multi_scale_test_pyramid(opt, path, stride, max_im_shrink)
+                
+                    preds = np.r_[preds, preds1, preds2, preds3, preds4]
+                
+                preds = bbox_vote(preds)
 
-            path = path.split('\\')
-            path_save = save_path+path[1]
-            if not os.path.exists(path_save):
-                os.makedirs(path_save)
-            path_txt = path_save+'/'+path[2][:-3]+'txt'
-            write_txt(path_txt, preds)
+                preds[:,2] = preds[:,2]-preds[:,0]
+                preds[:,3] = preds[:,3]-preds[:,1]
+
+                filename = os.path.basename(path)
+                path_save = save_path+event
+                if not os.path.exists(path_save):
+                    os.makedirs(path_save)
+                path_txt = path_save+'/'+filename[:-3]+'txt'
+                write_txt(path_txt, preds)
             

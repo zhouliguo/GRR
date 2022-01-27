@@ -7,11 +7,11 @@ import torch
 
 from models.experimental import attempt_load
 from utils.datasets import letterbox
-from utils.general import check_img_size, check_requirements, non_max_suppression
+from utils.general import check_img_size, check_requirements, non_max_suppression, scale_coords
 from utils.torch_utils import select_device
 
 
-def detect(model, img, im0s, shapes, opt, flip=False):
+def detect(model, img, im0s, opt, flip=False):
     img = torch.from_numpy(img).to(device)
     img = img.half() if opt.half else img.float()  # uint8 to fp16/32
     img /= 255.0  # 0 - 255 to 0.0 - 1.0
@@ -20,8 +20,13 @@ def detect(model, img, im0s, shapes, opt, flip=False):
 
     # Inference
     pred = model(img)[0]
+
+    if flip:
+        pred[:,:,0] = img.shape[3] - pred[:,:,0]
+
     length = pred.shape[1]
     size_min = int(length/85)
+
     pred1=[]
     pred1.append(pred[:,0:size_min*64])
     pred1.append(pred[:,size_min*64:size_min*80])
@@ -29,21 +34,11 @@ def detect(model, img, im0s, shapes, opt, flip=False):
     pred1.append(pred[:,size_min*84:size_min*85])
 
     boxes=[]
-
     for j, pred in enumerate(pred1):
-        if flip:
-            pred[1,:,0] = img.shape[3] - pred[1,:,0]
-            pred = torch.cat([pred[0], pred[1]], 0)
-            pred = pred.unsqueeze(0)
-
-        low=2**(j+2)
-        index = (pred[:,:,2]>=low) & (pred[:,:,3]>=low)
-        pred = pred[index].unsqueeze(0)
         # Apply NMS
-
         pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres)[0].cpu().numpy()
 
-        pred[:, :4] = scale_coords(img.shape[2:], pred[:, :4], im0s.shape, shapes[1])
+        pred[:, :4] = scale_coords(img.shape[2:], pred[:, :4], im0s.shape)
 
         boxes.append(pred[:, :5])
 
@@ -51,58 +46,24 @@ def detect(model, img, im0s, shapes, opt, flip=False):
         return np.array([[0,0,0,0,0.001]])
     return np.concatenate(boxes)
 
-def scale_coords(img1_shape, coords, img0_shape, ratio_pad=None):
-    # Rescale coords (xyxy) from img1_shape to img0_shape
-    if ratio_pad is None:  # calculate from img0_shape
-        gain = min(img1_shape[0] / img0_shape[0], img1_shape[1] / img0_shape[1])  # gain  = old / new
-        pad = (img1_shape[1] - img0_shape[1] * gain) / 2, (img1_shape[0] - img0_shape[0] * gain) / 2  # wh padding
-    else:
-        gain = ratio_pad[0][0]
-        pad = ratio_pad[1]
-
-    coords[:, [0, 2]] -= pad[0]  # x padding
-    coords[:, [1, 3]] -= pad[1]  # y padding
-    coords[:, :4] /= gain
-
-    coords[:, 0] = np.clip(coords[:, 0], 0, img0_shape[1])  # x1
-    coords[:, 1] = np.clip(coords[:, 1], 0, img0_shape[0])  # y1
-    coords[:, 2] = np.clip(coords[:, 2], 0, img0_shape[1])  # x2
-    coords[:, 3] = np.clip(coords[:, 3], 0, img0_shape[0])  # y2
-    return coords
-
 def load_image(path, stride, flip=False, shrink=1):
     # Read image
     img0 = cv2.imread(path)  # BGR
-    #img0 = cv2.resize(img0,(640,480))
     img_size = max(img0.shape[:2])
-    img_size = int(np.around(img_size*shrink))
+    img_size = img_size*shrink
     img_size = check_img_size(img_size, s=stride)
-    #img_size = 512
+    if flip:
+        img0 = cv2.flip(img0,1)
     assert img0 is not None, 'Image Not Found ' + path
-    h0, w0 = img0.shape[:2]  # orig hw
-    r = img_size / max(h0, w0)  # ratio
-    if r != 1:  # if sizes are not equal
-        img = cv2.resize(img0, (int(w0 * r), int(h0 * r)),interpolation=cv2.INTER_AREA if r < 1 else cv2.INTER_LINEAR)
-    else:
-        img = img0.copy()
-
-    h,w = img.shape[:2]
 
     # Padded resize
-    img, _, pad = letterbox(img, img_size, stride=stride)
-    shapes = (h0, w0), ((h / h0, w / w0), pad)
+    img = letterbox(img0, img_size, stride=stride)[0]
 
     # Convert
-    img = img[:, :, ::-1]   # BGR to RGB
-    if flip:
-        img = np.array([img, cv2.flip(img,1)])
-        img = img.transpose(0, 3, 1, 2) # to 3x416x416
-    else:
-        img = img.transpose(2, 0, 1)
-
+    img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB, to 3x416x416
     img = np.ascontiguousarray(img)
 
-    return img, img0, shapes
+    return img, img0
 
 def bbox_vote(det):
     zero_index = np.where((det[:,2] <= det[:,0]) | (det[:,3] <= det[:,1]))[0]
@@ -169,8 +130,8 @@ if __name__ == '__main__':
         model(torch.zeros(1, 3, 32, 32).to(device).type_as(next(model.parameters())))  # run once
 
     with torch.no_grad():
-        img, img0, shapes = load_image(image_path, stride, False)
-        preds = detect(model, img, img0, shapes, opt, False)
+        img, img0 = load_image(image_path, stride, False)
+        preds = detect(model, img, img0, opt, False)
         preds = bbox_vote(preds).astype(np.float32)
 
         for pred in preds:

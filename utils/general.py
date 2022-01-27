@@ -33,7 +33,7 @@ from utils.metrics import box_iou, fitness
 
 # Settings
 FILE = Path(__file__).resolve()
-ROOT = FILE.parents[1]  # YOLOv5 root directory
+ROOT = FILE.parents[1]  # root directory
 NUM_THREADS = min(8, max(1, os.cpu_count() - 1))  # number of YOLOv5 multiprocessing threads
 
 torch.set_printoptions(linewidth=320, precision=5, profile='long')
@@ -683,7 +683,10 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, classes=Non
             continue
 
         # Compute conf
-        x[:, 5:] *= x[:, 4:5]  # conf = obj_conf * cls_conf
+        if multi_label:
+            x[:, 5:] *= x[:, 4:5]  # conf = obj_conf * cls_conf
+        else:
+            x[:, 5:] = x[:, 4:5]  # conf = obj_conf
 
         # Box (center x, center y, width, height) to (x1, y1, x2, y2)
         box = xywh2xyxy(x[:, :4])
