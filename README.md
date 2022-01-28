@@ -8,7 +8,7 @@ https://github.com/zhouliguo/FaceDetection
 
 ## Download
 
-Model: https://drive.google.com/file/d/1CdAYQFW93naWBTLBsD9vy8oZXJ5SKpr3/view?usp=sharing
+Model: https://drive.google.com/drive/folders/1niPITB5tU4aC-NDy4mkAmzePkYeKfXxV?usp=sharing
 
 ## Test
 ### Evaluate WIDER FACE
