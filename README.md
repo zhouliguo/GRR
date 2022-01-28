@@ -3,8 +3,7 @@ Image Grid Recognition and Regression Fast and Accurate Face Detection
 
 This repository is under building
 
-C++ Version
-https://github.com/zhouliguo/FaceDetection
+C++ Version: https://github.com/zhouliguo/FaceDetection
 
 ## Download
 
