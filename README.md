@@ -7,19 +7,16 @@ C++ Version: https://github.com/zhouliguo/FaceDetection
 
 ## Download
 
-Model: https://drive.google.com/drive/folders/1niPITB5tU4aC-NDy4mkAmzePkYeKfXxV?usp=sharing
+Trained Models: https://drive.google.com/drive/folders/1niPITB5tU4aC-NDy4mkAmzePkYeKfXxV?usp=sharing
 
 ## Test
 ### Evaluate WIDER FACE
-1. Modify the input path, output path and model path in eval_wider.py
-2. cd GRR, run python eval.py
+1. cd GRR
+2. python eval.py --weights='weight path' --source='WIDER FACE path'+'/WIDER_val/images/' --save-path='save path'
 
 ### Detect Demo
-1. cd GRR, run python detect.py --image-path='image_path'
-
-### Speed Test on CPU
-1. Build a Visul Studio C++ project with OpenCV and LibTorch
-2. Complie detect.cpp
+1. cd GRR
+2. python detect.py --weights='weight path'  --image-path='image path'
 
 ## Train
 
