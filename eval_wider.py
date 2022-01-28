@@ -208,7 +208,7 @@ if __name__ == '__main__':
     parser.add_argument('--device', default='0', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--save-path', default='D:/WIDER_FACE/val_results/val0.33-0.25/', help='save path')
     parser.add_argument('--half', action='store_true', help='use FP16 half-precision inference')
-    parser.add_argument('--multi-scale', default=True, help='multi_scale_test')
+    parser.add_argument('--multi-scale', default=False, help='multi_scale_test')
 
     opt = parser.parse_args()
     print(opt)
