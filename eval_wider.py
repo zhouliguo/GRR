@@ -1,5 +1,4 @@
 import argparse
-import time
 
 import os
 import numpy as np
@@ -22,13 +21,22 @@ def detect(model, img, im0s, opt, flip=False):
         img = img.unsqueeze(0)
 
     # Inference
+    if not opt.multi_scale:
+        start = time.time()
+
     pred = model(img)[0]
 
+    if not opt.multi_scale:
+        forward_time = time.time() - start
+
     if flip:
-        pred[:,:,0] = img.shape[3] - pred[:,:,0]
+        pred[:,:,0] = img.shape[3] - pred[:,:,0] - 1
 
     length = pred.shape[1]
     size_min = int(length/85)
+
+    if not opt.multi_scale:
+        start = time.time()
 
     pred1=[]
     pred1.append(pred[:,0:size_min*64])
@@ -40,14 +48,22 @@ def detect(model, img, im0s, opt, flip=False):
     for j, pred in enumerate(pred1):
         # Apply NMS
         pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres)[0].cpu().numpy()
-
         pred[:, :4] = scale_coords(img.shape[2:], pred[:, :4], im0s.shape)
 
         boxes.append(pred[:, :5])
 
-    if len(boxes)==0:
-        return np.array([[0,0,0,0,0.001]])
-    return np.concatenate(boxes)
+    if not opt.multi_scale:
+        post_time = time.time() - start
+
+    boxes = np.concatenate(boxes)
+
+    if len(boxes) == 0:
+        boxes = np.array([[0,0,0,0,0.001]])
+    
+    if opt.multi_scale:
+        return boxes
+    else:
+        return boxes, forward_time, post_time
 
 def load_image(path, stride, flip=False, shrink=1):
     # Read image
@@ -185,12 +201,12 @@ def multi_scale_test_pyramid(opt, path, stride, max_shrink):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--weights', nargs='+', type=str, default='D:/best-val1.33-1.pt', help='model.pt path(s)')
+    parser.add_argument('--weights', nargs='+', type=str, default='weights/weight_light.pt', help='model.pt path(s)')
     parser.add_argument('--source', type=str, default='D:/WIDER_FACE/WIDER_val/images/', help='source')
     parser.add_argument('--conf-thres', type=float, default=0.001, help='object confidence threshold')
     parser.add_argument('--iou-thres', type=float, default=0.6, help='IOU threshold for NMS')
-    parser.add_argument('--device', default='1', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
-    parser.add_argument('--save-path', default='D:/WIDER_FACE/val_results/val1.33-1/', help='save path')
+    parser.add_argument('--device', default='0', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
+    parser.add_argument('--save-path', default='D:/WIDER_FACE/val_results/val0.33-0.25/', help='save path')
     parser.add_argument('--half', action='store_true', help='use FP16 half-precision inference')
     parser.add_argument('--multi-scale', default=True, help='multi_scale_test')
 
@@ -215,11 +231,17 @@ if __name__ == '__main__':
 
     events = os.listdir(opt.source)
 
+    ft_sum = 0
+    pt_sum = 0
+    im_sum = 0
+
     for event in events:
         paths = sorted(glob.glob(opt.source+event+'/*', recursive=True))
 
         for img_num, path in enumerate(paths):
             print(event, img_num, path)
+            im_sum = im_sum+1
+
             img = cv2.imread(path)
             max_im_shrink = (0x7fffffff / 200.0 / (img.shape[0] * img.shape[1])) ** 0.5 # the max size of input image for caffe
             max_im_shrink = 3 if max_im_shrink > 3 else max_im_shrink
@@ -227,15 +249,20 @@ if __name__ == '__main__':
             with torch.no_grad():
                 img, img0 = load_image(path, stride)
                 preds = detect(model, img, img0, opt)
-                
+
                 if multi_scale:
                     img, img0 = load_image(path, stride, True)
-                    preds1 = detect(model, img, img0, opt, True)
+                    preds1= detect(model, img, img0, opt, True)
+
 
                     preds2, preds3 = multi_scale_test(opt, path, stride, max_im_shrink)
                     preds4 = multi_scale_test_pyramid(opt, path, stride, max_im_shrink)
                 
                     preds = np.r_[preds, preds1, preds2, preds3, preds4]
+                else:
+                    ft_sum = ft_sum+preds[1]
+                    pt_sum = pt_sum+preds[2]
+                    preds = preds[0]
                 
                 preds = bbox_vote(preds)
 
@@ -248,4 +275,10 @@ if __name__ == '__main__':
                     os.makedirs(path_save)
                 path_txt = path_save+'/'+filename[:-3]+'txt'
                 write_txt(path_txt, preds)
+
+    print('Total Images:', im_sum)
+
+    if not multi_scale:
+        print('Total Forward Time (s):', ft_sum)
+        print('Total Post-Proc Time (s):', pt_sum)
             

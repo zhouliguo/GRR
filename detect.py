@@ -22,7 +22,7 @@ def detect(model, img, im0s, opt, flip=False):
     pred = model(img)[0]
 
     if flip:
-        pred[:,:,0] = img.shape[3] - pred[:,:,0]
+        pred[:,:,0] = img.shape[3] - pred[:,:,0] - 1
 
     length = pred.shape[1]
     size_min = int(length/85)
