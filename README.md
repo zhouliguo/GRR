@@ -1,5 +1,5 @@
 # GRR Face Detection
-Image Grid Recognition and Regression
+Image Grid Recognition and Regression Fast and Accurate Face Detection
 
 This repository is under building
 
@@ -9,7 +9,7 @@ Model: https://drive.google.com/file/d/1CdAYQFW93naWBTLBsD9vy8oZXJ5SKpr3/view?us
 
 ## Test
 ### Evaluate WIDER FACE
-1. Modify the input path, output path and model path in eval.py
+1. Modify the input path, output path and model path in eval_wider.py
 2. cd GRR, run python eval.py
 
 ### Detect Demo
