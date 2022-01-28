@@ -26,7 +26,7 @@ Trained Models: https://drive.google.com/drive/folders/1niPITB5tU4aC-NDy4mkAmzeP
 <img src="https://github.com/zhouliguo/GRR/blob/main/figures/wider.png">
 
 ### DarkFace, DFD and MAFA
-<img src="https://github.com/zhouliguo/GRR/blob/main/figures/ddm.png">
+<img src="https://github.com/zhouliguo/GRR/blob/main/figures/dtm.png">
 
 ## Comparison of Speed
 
