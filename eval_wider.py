@@ -29,9 +29,6 @@ def detect(model, img, im0s, opt, flip=False):
     if not opt.multi_scale:
         forward_time = time.time() - start
 
-    if flip:
-        pred[:,:,0] = img.shape[3] - pred[:,:,0] - 1
-
     length = pred.shape[1]
     size_min = int(length/85)
 
@@ -46,6 +43,10 @@ def detect(model, img, im0s, opt, flip=False):
 
     boxes=[]
     for j, pred in enumerate(pred1):
+        if flip:
+            pred[1,:,0] = img.shape[3] - pred[1,:,0]
+            pred = torch.cat([pred[0], pred[1]], 0)
+            pred = pred.unsqueeze(0)
         # Apply NMS
         pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres)[0].cpu().numpy()
         pred[:, :4] = scale_coords(img.shape[2:], pred[:, :4], im0s.shape)
@@ -68,18 +69,22 @@ def detect(model, img, im0s, opt, flip=False):
 def load_image(path, stride, flip=False, shrink=1):
     # Read image
     img0 = cv2.imread(path)  # BGR
+    assert img0 is not None, 'Image Not Found ' + path
+
     img_size = max(img0.shape[:2])
     img_size = int(np.round(img_size*shrink))
     img_size = check_img_size(img_size, s=stride)
-    if flip:
-        img0 = cv2.flip(img0,1)
-    assert img0 is not None, 'Image Not Found ' + path
 
     # Padded resize
     img = letterbox(img0, img_size, stride=stride)[0]
 
     # Convert
-    img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB, to 3x416x416
+    img = img[:, :, ::-1]#.transpose(2, 0, 1)  # BGR to RGB, to 3x416x416
+    if flip:
+        img = np.array([img, cv2.flip(img,1)])
+        img = img.transpose(0, 3, 1, 2) # to 3x416x416
+    else:
+        img = img.transpose(2, 0, 1)
     img = np.ascontiguousarray(img)
 
     return img, img0
@@ -137,32 +142,32 @@ def multi_scale_test(opt, path, stride, max_im_shrink):
     # shrink detecting and shrink only detect big face
     st = 0.5 if max_im_shrink >= 0.75 else 0.5 * max_im_shrink
 
-    img, img0 = load_image(path, stride, False, st)
-    det_s = detect(model, img, img0, opt)
+    img, img0 = load_image(path, stride, True, st)
+    det_s = detect(model, img, img0, opt, True)
 
     if max_im_shrink > 0.75:
-        img, img0 = load_image(path, stride, False, 0.75)
-        det_s = np.row_stack((det_s, detect(model, img, img0, opt)))
+        img, img0 = load_image(path, stride, True, 0.75)
+        det_s = np.row_stack((det_s, detect(model, img, img0, opt, True)))
     index = np.where(np.maximum(det_s[:, 2] - det_s[:, 0], det_s[:, 3] - det_s[:, 1]) > 30)[0]
     det_s = det_s[index, :]
     # enlarge one times
     bt = min(2, max_im_shrink) if max_im_shrink > 1 else (st + max_im_shrink) / 2
-    img, img0 = load_image(path, stride, False, bt)
-    det_b = detect(model, img, img0, opt)
+    img, img0 = load_image(path, stride, True, bt)
+    det_b = detect(model, img, img0, opt, True)
 
     # enlarge small iamge x times for small face
     if max_im_shrink > 1.5:
-        img, img0 = load_image(path, stride, False, 1.5)
-        det_b = np.row_stack((det_b, detect(model, img, img0, opt)))
+        img, img0 = load_image(path, stride, True, 1.5)
+        det_b = np.row_stack((det_b, detect(model, img, img0, opt, True)))
     if max_im_shrink > 2:
         bt *= 2
         while bt < max_im_shrink: # and bt <= 2:
-            img, img0 = load_image(path, stride, False, bt)
-            det_b = np.row_stack((det_b, detect(model, img, img0, opt)))
+            img, img0 = load_image(path, stride, True, bt)
+            det_b = np.row_stack((det_b, detect(model, img, img0, opt, True)))
             bt *= 2
 
-        img, img0 = load_image(path, stride, False, max_im_shrink)
-        det_b = np.row_stack((det_b, detect(model, img, img0, opt)))
+        img, img0 = load_image(path, stride, True, max_im_shrink)
+        det_b = np.row_stack((det_b, detect(model, img, img0, opt, True)))
 
     # enlarge only detect small face
     if bt > 1:
@@ -175,16 +180,16 @@ def multi_scale_test(opt, path, stride, max_im_shrink):
     return det_s, det_b
 
 def multi_scale_test_pyramid(opt, path, stride, max_shrink):
-    img, img0 = load_image(path, stride, False, 0.25)
-    det_b = detect(model, img, img0, opt)
+    img, img0 = load_image(path, stride, True, 0.25)
+    det_b = detect(model, img, img0, opt, True)
     index = np.where(np.maximum(det_b[:, 2] - det_b[:, 0], det_b[:, 3] - det_b[:, 1])> 30)[0]
     det_b = det_b[index, :]
 
     st = [1.25, 1.75, 2.25]
     for i in range(len(st)):
         if (st[i] <= max_shrink):
-            img, img0 = load_image(path, stride, False, st[i])
-            det_temp = detect(model, img, img0, opt)
+            img, img0 = load_image(path, stride, True, st[i])
+            det_temp = detect(model, img, img0, opt, True)
             # enlarge only detect small face
             if st[i] > 1:
                 index = np.where(
@@ -201,14 +206,14 @@ def multi_scale_test_pyramid(opt, path, stride, max_shrink):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--weights', nargs='+', type=str, default='weights/weight_light.pt', help='model.pt path(s)')
+    parser.add_argument('--weights', nargs='+', type=str, default='C:/Users/zhouliguo/Desktop/best.pt', help='model.pt path(s)')
     parser.add_argument('--source', type=str, default='D:/WIDER_FACE/WIDER_val/images/', help='source')
     parser.add_argument('--conf-thres', type=float, default=0.001, help='object confidence threshold')
     parser.add_argument('--iou-thres', type=float, default=0.6, help='IOU threshold for NMS')
     parser.add_argument('--device', default='0', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
-    parser.add_argument('--save-path', default='D:/WIDER_FACE/val_results/val0.33-0.25/', help='save path')
+    parser.add_argument('--save-path', default='D:/WIDER_FACE/val_results/val1.33-1/', help='save path')
     parser.add_argument('--half', action='store_true', help='use FP16 half-precision inference')
-    parser.add_argument('--multi-scale', default=False, help='multi_scale_test')
+    parser.add_argument('--multi-scale', default=True, help='multi_scale_test')
 
     opt = parser.parse_args()
     print(opt)
@@ -247,9 +252,6 @@ if __name__ == '__main__':
             max_im_shrink = 3 if max_im_shrink > 3 else max_im_shrink
 
             with torch.no_grad():
-                img, img0 = load_image(path, stride)
-                preds = detect(model, img, img0, opt)
-
                 if multi_scale:
                     img, img0 = load_image(path, stride, True)
                     preds1= detect(model, img, img0, opt, True)
@@ -258,8 +260,10 @@ if __name__ == '__main__':
                     preds2, preds3 = multi_scale_test(opt, path, stride, max_im_shrink)
                     preds4 = multi_scale_test_pyramid(opt, path, stride, max_im_shrink)
                 
-                    preds = np.r_[preds, preds1, preds2, preds3, preds4]
+                    preds = np.r_[preds1, preds2, preds3, preds4]
                 else:
+                    img, img0 = load_image(path, stride)
+                    preds = detect(model, img, img0, opt)
                     ft_sum = ft_sum+preds[1]
                     pt_sum = pt_sum+preds[2]
                     preds = preds[0]

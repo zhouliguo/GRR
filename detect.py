@@ -105,7 +105,7 @@ def bbox_vote(det):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--weights', nargs='+', type=str, default='weights/weight_light.pt', help='model.pt path(s)')
-    parser.add_argument('--image-path', type=str, default='D:/WIDER_FACE/WIDER_train/images/0--Parade/0_Parade_marchingband_1_364.jpg', help='image')  # file/folder, 0 for webcam
+    parser.add_argument('--image-path', type=str, default='figures/0_Parade_marchingband_1_364.jpg', help='image')  # file/folder, 0 for webcam
     parser.add_argument('--conf-thres', type=float, default=0.001, help='object confidence threshold')
     parser.add_argument('--iou-thres', type=float, default=0.6, help='IOU threshold for NMS')
     parser.add_argument('--device', default='cpu', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
