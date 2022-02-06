@@ -2,13 +2,13 @@ import os
 import cv2
 import numpy as np
 
-def codelabel(path):
+def codelabel(path, image_list):
     images = []
     txts = []
     txts2 = []
     folderlist = os.listdir(path+'labels')
 
-    fl = open('test.txt','w')
+    fl = open(image_list,'w')
     for folder in folderlist:
         filelist = os.listdir(os.path.join(path+'labels', folder))
         for l in filelist:
@@ -41,4 +41,8 @@ def codelabel(path):
         f2.close()
 
 if __name__ == '__main__':
-    codelabel('D:/WIDER_FACE/WIDER_test/')
+    # path is path of subset
+    # path + 'labels' is the original label folder
+    # path + 'label' is the coded label folder
+    # image_list is the image path list
+    codelabel(path = 'D:/WIDER_FACE/WIDER_test/', image_list='test.txt')
