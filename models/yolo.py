@@ -4,7 +4,7 @@ from copy import deepcopy
 from pathlib import Path
 
 FILE = Path(__file__).resolve()
-ROOT = FILE.parents[1]  # root directory
+ROOT = FILE.parents[1]  # YOLOv5 root directory
 if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))  # add ROOT to PATH
 # ROOT = ROOT.relative_to(Path.cwd())  # relative
@@ -12,8 +12,9 @@ if str(ROOT) not in sys.path:
 from models.common import *
 from models.experimental import *
 from utils.autoanchor import check_anchor_order
-from utils.general import LOGGER, make_divisible
-from utils.torch_utils import fuse_conv_and_bn, initialize_weights, time_sync
+from utils.general import LOGGER, check_version, check_yaml, make_divisible, print_args
+#from utils.plots import feature_visualization
+from utils.torch_utils import fuse_conv_and_bn, initialize_weights, scale_img, select_device, time_sync
 
 try:
     import thop  # for FLOPs computation
@@ -51,10 +52,10 @@ class Detect(nn.Module):
                 y = x[i].sigmoid()
                 if self.inplace:
                     y[..., 0:2] = (y[..., 0:2] * 2 - 0.5 + self.grid[i]) * self.stride[i]  # xy
-                    y[..., 2:4] = torch.pow(self.anchors[i], y[..., 2:4] + 1)   #wh
-                else: 
+                    y[..., 2:4] = torch.pow(self.anchors[i], y[..., 2:4] + 1)
+                else:  # for YOLOv5 on AWS Inferentia https://github.com/ultralytics/yolov5/pull/2953
                     xy = (y[..., 0:2] * 2 - 0.5 + self.grid[i]) * self.stride[i]  # xy
-                    wh = torch.pow(self.anchors[i], y[..., 2:4] + 1)   #wh
+                    wh = torch.pow(self.anchors[i], y[..., 2:4] + 1)
                     y = torch.cat((xy, wh, y[..., 4:]), -1)
                 z.append(y.view(bs, -1, self.no))
 
@@ -64,7 +65,10 @@ class Detect(nn.Module):
 
     def _make_grid(self, nx=20, ny=20, i=0):
         d = self.anchors[i].device
-        yv, xv = torch.meshgrid([torch.arange(ny).to(d), torch.arange(nx).to(d)], indexing='ij')
+        if check_version(torch.__version__, '1.10.0'):  # torch>=1.10.0 meshgrid workaround for torch>=0.7 compatibility
+            yv, xv = torch.meshgrid([torch.arange(ny).to(d), torch.arange(nx).to(d)], indexing='ij')
+        else:
+            yv, xv = torch.meshgrid([torch.arange(ny).to(d), torch.arange(nx).to(d)])
         grid = torch.stack((xv, yv), 2).expand((1, self.na, ny, nx, 2)).float()
         anchor_grid = (self.anchors[i].clone() * self.stride[i]) \
             .view((1, self.na, 1, 1, 2)).expand((1, self.na, ny, nx, 2)).float()
@@ -72,7 +76,7 @@ class Detect(nn.Module):
 
 
 class Model(nn.Module):
-    def __init__(self, cfg='model.yaml', ch=3, nc=None, anchors=None):  # model, input channels, number of classes
+    def __init__(self, cfg='yolov5s.yaml', ch=3, nc=None, anchors=None):  # model, input channels, number of classes
         super().__init__()
         if isinstance(cfg, dict):
             self.yaml = cfg  # model dict
@@ -107,8 +111,29 @@ class Model(nn.Module):
 
         # Init weights, biases
         initialize_weights(self)
+        #self.info()
+        LOGGER.info('')
 
-    def forward(self, x, profile=False):
+    def forward(self, x, augment=False, profile=False, visualize=False):
+        if augment:
+            return self._forward_augment(x)  # augmented inference, None
+        return self._forward_once(x, profile, visualize)  # single-scale inference, train
+
+    def _forward_augment(self, x):
+        img_size = x.shape[-2:]  # height, width
+        s = [1, 0.83, 0.67]  # scales
+        f = [None, 3, None]  # flips (2-ud, 3-lr)
+        y = []  # outputs
+        for si, fi in zip(s, f):
+            xi = scale_img(x.flip(fi) if fi else x, si, gs=int(self.stride.max()))
+            yi = self._forward_once(xi)[0]  # forward
+            # cv2.imwrite(f'img_{si}.jpg', 255 * xi[0].cpu().numpy().transpose((1, 2, 0))[:, :, ::-1])  # save
+            yi = self._descale_pred(yi, fi, si, img_size)
+            y.append(yi)
+        y = self._clip_augmented(y)  # clip augmented tails
+        return torch.cat(y, 1), None  # augmented inference, train
+
+    def _forward_once(self, x, profile=False, visualize=False):
         y, dt = [], []  # outputs
         for m in self.model:
             if m.f != -1:  # if not from previous layer
@@ -117,7 +142,8 @@ class Model(nn.Module):
                 self._profile_one_layer(m, x, dt)
             x = m(x)  # run
             y.append(x if m.i in self.save else None)  # save output
-
+            #if visualize:
+            #    feature_visualization(x, m.type, m.i, save_dir=visualize)
         return x
 
     def _descale_pred(self, p, flips, scale, img_size):
@@ -136,6 +162,17 @@ class Model(nn.Module):
                 x = img_size[1] - x  # de-flip lr
             p = torch.cat((x, y, wh, p[..., 4:]), -1)
         return p
+
+    def _clip_augmented(self, y):
+        # Clip YOLOv5 augmented inference tails
+        nl = self.model[-1].nl  # number of detection layers (P3-P5)
+        g = sum(4 ** x for x in range(nl))  # grid points
+        e = 1  # exclude layer count
+        i = (y[0].shape[1] // g) * sum(4 ** x for x in range(e))  # indices
+        y[0] = y[0][:, :-i]  # large
+        i = (y[-1].shape[1] // g) * sum(4 ** (nl - 1 - x) for x in range(e))  # indices
+        y[-1] = y[-1][:, i:]  # small
+        return y
 
     def _profile_one_layer(self, m, x, dt):
         c = isinstance(m, Detect)  # is final layer, copy input as inplace fix
@@ -173,12 +210,15 @@ class Model(nn.Module):
     #             LOGGER.info('%10.3g' % (m.w.detach().sigmoid() * 2))  # shortcut weights
 
     def fuse(self):  # fuse model Conv2d() + BatchNorm2d() layers
+        LOGGER.info('Fusing layers... ')
         for m in self.model.modules():
             if isinstance(m, (Conv, DWConv)) and hasattr(m, 'bn'):
                 m.conv = fuse_conv_and_bn(m.conv, m.bn)  # update conv
                 delattr(m, 'bn')  # remove batchnorm
                 m.forward = m.forward_fuse  # update forward
+        self.info()
         return self
+
 
     def _apply(self, fn):
         # Apply to(), cpu(), cuda(), half() to model tensors that are not parameters or registered buffers
@@ -244,3 +284,39 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
             ch = []
         ch.append(c2)
     return nn.Sequential(*layers), sorted(save)
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--cfg', type=str, default='yolov5.yaml', help='model.yaml')
+    parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
+    parser.add_argument('--profile', action='store_true', help='profile model speed')
+    parser.add_argument('--test', action='store_true', help='test all yolo*.yaml')
+    opt = parser.parse_args()
+    opt.cfg = check_yaml(opt.cfg)  # check YAML
+    print_args(FILE.stem, opt)
+    device = select_device(opt.device)
+
+    # Create model
+    model = Model(opt.cfg).to(device)
+    quit()
+    model.train()
+
+    # Profile
+    if opt.profile:
+        img = torch.rand(8 if torch.cuda.is_available() else 1, 3, 640, 640).to(device)
+        y = model(img, profile=True)
+
+    # Test all models
+    if opt.test:
+        for cfg in Path(ROOT / 'models').rglob('yolo*.yaml'):
+            try:
+                _ = Model(cfg)
+            except Exception as e:
+                print(f'Error in {cfg}: {e}')
+
+    # Tensorboard (not working https://github.com/ultralytics/yolov5/issues/2898)
+    # from torch.utils.tensorboard import SummaryWriter
+    # tb_writer = SummaryWriter('.')
+    # LOGGER.info("Run 'tensorboard --logdir=models' to view tensorboard at http://localhost:6006/")
+    # tb_writer.add_graph(torch.jit.trace(model, img, strict=False), [])  # add model graph

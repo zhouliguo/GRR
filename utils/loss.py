@@ -1,9 +1,12 @@
-# Loss functions
+# YOLOv5 🚀 by Ultralytics, GPL-3.0 license
+"""
+Loss functions
+"""
 
 import torch
 import torch.nn as nn
 
-from utils.general import bbox_iou
+from utils.metrics import bbox_iou
 from utils.torch_utils import is_parallel
 
 
@@ -15,7 +18,7 @@ def smooth_BCE(eps=0.1):  # https://github.com/ultralytics/yolov3/issues/238#iss
 class BCEBlurWithLogitsLoss(nn.Module):
     # BCEwithLogitLoss() with reduced missing label effects.
     def __init__(self, alpha=0.05):
-        super(BCEBlurWithLogitsLoss, self).__init__()
+        super().__init__()
         self.loss_fcn = nn.BCEWithLogitsLoss(reduction='none')  # must be nn.BCEWithLogitsLoss()
         self.alpha = alpha
 
@@ -32,7 +35,7 @@ class BCEBlurWithLogitsLoss(nn.Module):
 class FocalLoss(nn.Module):
     # Wraps focal loss around existing loss_fcn(), i.e. criteria = FocalLoss(nn.BCEWithLogitsLoss(), gamma=1.5)
     def __init__(self, loss_fcn, gamma=1.5, alpha=0.25):
-        super(FocalLoss, self).__init__()
+        super().__init__()
         self.loss_fcn = loss_fcn  # must be nn.BCEWithLogitsLoss()
         self.gamma = gamma
         self.alpha = alpha
@@ -62,7 +65,7 @@ class FocalLoss(nn.Module):
 class QFocalLoss(nn.Module):
     # Wraps Quality focal loss around existing loss_fcn(), i.e. criteria = FocalLoss(nn.BCEWithLogitsLoss(), gamma=1.5)
     def __init__(self, loss_fcn, gamma=1.5, alpha=0.25):
-        super(QFocalLoss, self).__init__()
+        super().__init__()
         self.loss_fcn = loss_fcn  # must be nn.BCEWithLogitsLoss()
         self.gamma = gamma
         self.alpha = alpha
@@ -85,15 +88,15 @@ class QFocalLoss(nn.Module):
             return loss
 
 
+
 class ComputeLoss:
     # Compute losses
     def __init__(self, model, autobalance=False):
-        super(ComputeLoss, self).__init__()
+        self.sort_obj_iou = False
         device = next(model.parameters()).device  # get model device
         h = model.hyp  # hyperparameters
 
         # Define criteria
-        #self.L1Loss = nn.L1Loss()
         BCEcls = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([h['cls_pw']], device=device))
         BCEobj = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([h['obj_pw']], device=device))
 
@@ -106,9 +109,9 @@ class ComputeLoss:
             BCEcls, BCEobj = FocalLoss(BCEcls, g), FocalLoss(BCEobj, g)
 
         det = model.module.model[-1] if is_parallel(model) else model.model[-1]  # Detect() module
-        self.balance = {3: [4.0, 1.0, 0.4]}.get(det.nl, [4.0, 1.0, 0.25, 0.06, .02])  # P3-P7
+        self.balance = {3: [4.0, 1.0, 0.4]}.get(det.nl, [4.0, 1.0, 0.25, 0.06, 0.02])  # P3-P7
         self.ssi = list(det.stride).index(16) if autobalance else 0  # stride 16 index
-        self.BCEcls, self.BCEobj, self.gr, self.hyp, self.autobalance = BCEcls, BCEobj, model.gr, h, autobalance
+        self.BCEcls, self.BCEobj, self.gr, self.hyp, self.autobalance = BCEcls, BCEobj, 1.0, h, autobalance
         for k in 'na', 'nc', 'nl', 'anchors':
             setattr(self, k, getattr(det, k))
 
@@ -116,29 +119,34 @@ class ComputeLoss:
         device = targets.device
         lcls, lbox, lobj = torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device)
         tcls, tbox, indices, anchors = self.build_targets(p, targets)  # targets
+        ifratio = torch.tensor([4,8,16,32],device=device) #image/feature
 
         # Losses
         for i, pi in enumerate(p):  # layer index, layer predictions
             tobj = torch.zeros_like(pi[..., 0], device=device)  # target obj
             if len(indices[i][0]):
                 b, a, gj, gi = indices[i]  # image, anchor, gridy, gridx
-
                 n = b.shape[0]  # number of targets
                 if n:
                     ps = pi[b, a, gj, gi]  # prediction subset corresponding to targets
 
                     # Regression
-                    pxy = ps[:, :2]#.sigmoid() * 2. - 0.5
+                    pxy = ps[:, :2].sigmoid()*2 - 0.5
                     #pwh = (ps[:, 2:4].sigmoid() * 2) ** 2 * anchors[i]
-                    pwh = torch.exp(ps[:, 2:4])#torch.pow(anchors[i], ps[:, 2:4].sigmoid() * 2)/anchors[i][0]
+                    #pwh = torch.pow(anchors[i], ps[:, 2:4].sigmoid() * 1.5+0.5)/ifratio[i]
+                    pwh = torch.pow(anchors[i], ps[:, 2:4].sigmoid() + 1)/ifratio[i]
                     pbox = torch.cat((pxy, pwh), 1)  # predicted box
                     iou = bbox_iou(pbox.T, tbox[i], x1y1x2y2=False, CIoU=True)  # iou(prediction, target)
                     lbox += (1.0 - iou).mean()  # iou loss
-                    #lbox += self.L1Loss(pbox, tbox[i])
 
                     # Objectness
-                    tobj[b, a, gj, gi] = 1#(1.0 - self.gr) + self.gr * iou.detach().clamp(0).type(tobj.dtype)  # iou ratio
-
+                    score_iou = iou.detach().clamp(0).type(tobj.dtype)
+                    if self.sort_obj_iou:
+                        sort_id = torch.argsort(score_iou)
+                        b, a, gj, gi, score_iou = b[sort_id], a[sort_id], gj[sort_id], gi[sort_id], score_iou[sort_id]
+                    tobj[b, a, gj, gi] = (1.0 - self.gr) + self.gr * score_iou  # iou ratio
+                    #lcls += self.BCEcls(pi[..., 5], tobj)
+                    #tobj[b, a, gj, gi] = (1.0 - self.gr) + self.gr * score_iou  # iou ratio
                     # Classification
                     if self.nc > 1:  # cls loss (only if multiple classes)
                         t = torch.full_like(ps[:, 5:], self.cn, device=device)  # targets
@@ -161,8 +169,7 @@ class ComputeLoss:
         lcls *= self.hyp['cls']
         bs = tobj.shape[0]  # batch size
 
-        loss = lbox + lobj + lcls
-        return loss * bs, torch.cat((lbox, lobj, lcls, loss)).detach()
+        return (lbox + lobj + lcls) * bs, torch.cat((lbox, lobj, lcls)).detach()
 
     def build_targets(self, p, targets):
         # Build targets for compute_loss(), input targets(image,class,x,y,w,h)
@@ -177,6 +184,7 @@ class ComputeLoss:
                             [1, 0], [0, 1], [-1, 0], [0, -1],  # j,k,l,m
                             # [1, 1], [1, -1], [-1, 1], [-1, -1],  # jk,jm,lk,lm
                             ], device=targets.device).float() * g  # offsets
+        ifratio = torch.tensor([4,8,16,32],device=targets.device) #image/feature
 
         for i in range(self.nl):
             anchors = self.anchors[i]
@@ -189,21 +197,59 @@ class ComputeLoss:
             gi, gj = [], []
             gx, gy, gw, gh = [], [], [], []
             a, b, c = [], [], []
-            #weights = (10., 10., 5., 5.)
-            #weights = (1., 1., 0.5, 0.5)
 
             if nt:
-                for ti in t[0]:
-                    r = ti[4:6]*anchors[0]
-                    r = torch.log(r)/torch.log(anchors[0])
+                #r = t[:, :, 4:6]*anchors[0]
+                r = t[:, :, 4:6]*ifratio[i]
+                r = torch.log(r)/torch.log(anchors[0])
 
-                    if torch.max(r[0], r[1]) > 2 or torch.min(r[0], r[1]) < 0.5:
-                        continue
+                j = torch.max(r[:,:,0], r[:,:,1]) <= 2
+                #k = torch.min(r[:,:,0], r[:,:,1]) >= 0.5
+                k = torch.min(t[:,:,4], t[:,:,5]) >= 1
+                j = torch.logical_and(j, k)
+                t = t[j]  # filter
 
-                    gl = torch.round(ti[2]-ti[4]/2)
-                    gr = torch.round(ti[2]+ti[4]/2)-1
-                    gu = torch.round(ti[3]-ti[5]/2)
-                    gd = torch.round(ti[3]+ti[5]/2)-1
+                '''
+                # Matches
+                r = t[:, :, 4:6] / anchors[:, None]  # wh ratio
+                j = torch.max(r, 1. / r).max(2)[0] < self.hyp['anchor_t']  # compare
+                # j = wh_iou(anchors, t[:, 4:6]) > model.hyp['iou_t']  # iou(3,n)=wh_iou(anchors(3,2), gwh(n,2))
+                t = t[j]  # filter
+                '''
+                
+                for ti in t:
+                    
+                    px1 = ti[2].int()
+                    py1 = ti[3].int()
+
+                    if torch.round(ti[2]) == px1:
+                        px2 = px1-1
+                    else:
+                        px2 = px1+1
+                    py2 = py1
+
+                    if torch.round(ti[3]) == py1:
+                        py3 = py1-1
+                    else:
+                        py3 = py1+1
+                    px3 = px1
+
+                    #px4 = px2
+                    #py4 = py3
+                    
+                    px = []#torch.stack((px1, px2, px3)).clamp_(0, gain[2] - 1)
+                    py = []#torch.stack((py1, py2, py3)).clamp_(0, gain[3] - 1)
+
+                    
+                    #gl = torch.round(ti[2]-ti[4]/2)
+                    #gr = torch.round(ti[2]+ti[4]/2)-1
+                    #gu = torch.round(ti[3]-ti[5]/2)
+                    #gd = torch.round(ti[3]+ti[5]/2)-1
+
+                    gl = (ti[2]-ti[4]/2).int()
+                    gr = (ti[2]+ti[4]/2).int()
+                    gu = (ti[3]-ti[5]/2).int()
+                    gd = (ti[3]+ti[5]/2).int()
 
                     if gr < gl:
                         gl = ti[2].int()
@@ -212,28 +258,35 @@ class ComputeLoss:
                         gu = ti[3].int()
                         gd = ti[3].int()
 
-                    gii = torch.arange(gl, gr+1).clamp_(0, gain[2] - 1).cuda()
-                    gjj = torch.arange(gu, gd+1).clamp_(0, gain[3] - 1).cuda()
-                    gii_len = gii.shape[0]
-                    gii = gii.repeat(gjj.shape[0], 1).T.reshape(-1)
-                    gjj = gjj.repeat(gii_len)
+                    if px1>=gl and px1<=gr and py1>=gu and py1<=gd:
+                        px.append(px1)
+                        py.append(py1)
+                    if px2>=gl and px2<=gr and py2>=gu and py2<=gd:
+                        px.append(px2)
+                        py.append(py2)
+                    if px3>=gl and px3<=gr and py3>=gu and py3<=gd:
+                        px.append(px3)
+                        py.append(py3)
 
-                    gi.append(gii)
-                    gj.append(gjj)
-
-                    gii_len = gii.shape[0]
-                    gx.append(ti[2].repeat(gii_len) - gii - 0.5)
-                    gy.append(ti[3].repeat(gii_len) - gjj - 0.5)
-                    gw.append(ti[4].repeat(gii_len))
-                    gh.append(ti[5].repeat(gii_len))
+                    #gii = torch.arange(gl, gr+1).clamp_(0, gain[2] - 1).cuda()
+                    #gjj = torch.arange(gu, gd+1).clamp_(0, gain[3] - 1).cuda()
                     
-                    a.append(ti[6].repeat(gii_len))
-                    b.append(ti[0].repeat(gii_len))
-                    c.append(ti[1].repeat(gii_len))
+                    gi.append(torch.stack(px))
+                    gj.append(torch.stack(py))
+
+                    px_len = len(px)
+                    gx.append(ti[2].repeat(px_len) - torch.stack(px))
+                    gy.append(ti[3].repeat(px_len) - torch.stack(py))
+                    gw.append(ti[4].repeat(px_len))
+                    gh.append(ti[5].repeat(px_len))
+                    
+                    a.append(ti[6].repeat(px_len))
+                    b.append(ti[0].repeat(px_len))
+                    c.append(ti[1].repeat(px_len))
 
                 if len(gi)>0 and len(gj)>0:
-                    gi = torch.cat(gi, -1).long()
-                    gj = torch.cat(gj, -1).long()
+                    gi = torch.cat(gi, -1).clamp_(0, gain[2] - 1).long()
+                    gj = torch.cat(gj, -1).clamp_(0, gain[3] - 1).long()
                     gx = torch.cat(gx, -1)
                     gy = torch.cat(gy, -1)
                     gw = torch.cat(gw, -1)

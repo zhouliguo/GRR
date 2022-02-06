@@ -259,6 +259,14 @@ def check_file(file, suffix=''):
         assert len(files) == 1, f"Multiple files match '{file}', specify exact path: {files}"  # assert unique
         return files[0]  # return file
 
+def check_version(current='0.0.0', minimum='0.0.0', name='version ', pinned=False, hard=False):
+    # Check version vs. required version
+    current, minimum = (pkg.parse_version(x) for x in (current, minimum))
+    result = (current == minimum) if pinned else (current >= minimum)  # bool
+    if hard:  # assert min requirements met
+        assert result, f'{name}{minimum} required by YOLOv5, but {name}{current} is currently installed'
+    else:
+        return result
 
 def check_dataset(data, autodownload=True):
     # Download and/or unzip dataset if not found locally
@@ -557,7 +565,7 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, classes=Non
     min_wh, max_wh = 2, 4096  # (pixels) minimum and maximum box width and height
     max_nms = 30000  # maximum number of boxes into torchvision.ops.nms()
     time_limit = 10.0  # seconds to quit after
-    redundant = True  # require redundant detections
+    redundant = False  # require redundant detections
     multi_label &= nc > 1  # multiple labels per box (adds 0.5ms/img)
     merge = True  # use merge-NMS
 

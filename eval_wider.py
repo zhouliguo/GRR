@@ -9,9 +9,43 @@ import torch
 
 from models.experimental import attempt_load
 from utils.datasets import letterbox
-from utils.general import check_img_size, non_max_suppression, scale_coords, set_logging
+from utils.general import check_img_size, non_max_suppression, scale_coords, set_logging, xywh2xyxy
 from utils.torch_utils import select_device
 
+def inverted_nms(det, iou_thres):
+    zero_index = np.where((det[:,2] <= det[:,0]) | (det[:,3] <= det[:,1]))[0]
+    det[zero_index,:] = 0
+
+    order = det[:, 4].ravel().argsort()
+    det = det[order, :]
+
+    area = (det[:, 2] - det[:, 0]) * (det[:, 3] - det[:, 1])
+
+    for i in range(len(det)-1):
+        boxes = det[0:i+1]
+        
+        xx1 = np.maximum(det[i+1, 0], boxes[:, 0])
+        yy1 = np.maximum(det[i+1, 1], boxes[:, 1])
+        xx2 = np.minimum(det[i+1, 2], boxes[:, 2])
+        yy2 = np.minimum(det[i+1, 3], boxes[:, 3])
+        w = np.maximum(0.0, xx2 - xx1)
+        h = np.maximum(0.0, yy2 - yy1)
+        inter = w * h
+        o = inter / (area[i+1] + area[0:i+1] - inter)
+        # get needed merge det and delete these det
+        iou = np.where(o > iou_thres)[0]
+        if len(iou)==0:
+            continue
+        det_accu = det[iou,:]
+        det_accu = np.row_stack((det_accu, det[i+1]))
+        det[iou,:] = 0
+
+        det_accu[:, 0:4] = det_accu[:, 0:4] * np.tile(det_accu[:, -1:], (1, 4))
+        det[i+1, 0:4] = np.sum(det_accu[:, 0:4], axis=0) / np.sum(det_accu[:, -1:])
+
+    index = np.where((det[:,4] != 0))
+
+    return det[index]
 
 def detect(model, img, im0s, opt, flip=False):
     img = torch.from_numpy(img).to(device)
@@ -48,7 +82,13 @@ def detect(model, img, im0s, opt, flip=False):
             pred = torch.cat([pred[0], pred[1]], 0)
             pred = pred.unsqueeze(0)
         # Apply NMS
-        pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres)[0].cpu().numpy()
+        #pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres)[0].cpu().numpy()
+
+        pred = pred[0,:,:5].cpu().numpy()
+        pred[:, :4] = xywh2xyxy(pred[:, :4])
+        pred = pred[pred[:,4]>opt.conf_thres]
+        pred = inverted_nms(pred, opt.iou_thres)
+
         pred[:, :4] = scale_coords(img.shape[2:], pred[:, :4], im0s.shape)
 
         boxes.append(pred[:, :5])
@@ -206,14 +246,14 @@ def multi_scale_test_pyramid(opt, path, stride, max_shrink):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--weights', nargs='+', type=str, default='C:/Users/zhouliguo/Desktop/best.pt', help='model.pt path(s)')
+    parser.add_argument('--weights', nargs='+', type=str, default='weights/weight_light.pt', help='model.pt path(s)')
     parser.add_argument('--source', type=str, default='D:/WIDER_FACE/WIDER_val/images/', help='source')
     parser.add_argument('--conf-thres', type=float, default=0.001, help='object confidence threshold')
     parser.add_argument('--iou-thres', type=float, default=0.6, help='IOU threshold for NMS')
     parser.add_argument('--device', default='0', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
-    parser.add_argument('--save-path', default='D:/WIDER_FACE/val_results/val1.33-1/', help='save path')
+    parser.add_argument('--save-path', default='D:/WIDER_FACE/val_results/val0.33-0.25/', help='save path')
     parser.add_argument('--half', action='store_true', help='use FP16 half-precision inference')
-    parser.add_argument('--multi-scale', default=True, help='multi_scale_test')
+    parser.add_argument('--multi-scale', default=False, help='multi_scale_test')
 
     opt = parser.parse_args()
     print(opt)
@@ -261,15 +301,18 @@ if __name__ == '__main__':
                     preds4 = multi_scale_test_pyramid(opt, path, stride, max_im_shrink)
                 
                     preds = np.r_[preds1, preds2, preds3, preds4]
+                    preds = bbox_vote(preds)
                 else:
                     img, img0 = load_image(path, stride)
                     preds = detect(model, img, img0, opt)
                     ft_sum = ft_sum+preds[1]
                     pt_sum = pt_sum+preds[2]
                     preds = preds[0]
+                    start = time.time()
+                    #preds = inverted_nms(preds, opt.iou_thres)
+                    preds = bbox_vote(preds)
+                    pt_sum = pt_sum+time.time()-start
                 
-                preds = bbox_vote(preds)
-
                 preds[:,2] = preds[:,2]-preds[:,0]
                 preds[:,3] = preds[:,3]-preds[:,1]
 
