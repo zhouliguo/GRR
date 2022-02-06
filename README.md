@@ -19,6 +19,8 @@ Trained Models: https://drive.google.com/drive/folders/1niPITB5tU4aC-NDy4mkAmzeP
 2. python detect.py --weights='weight path'  --image-path='image path'
 
 ## Train
+1. code the labels by codelabel.py
+2. python train.py --data='data path'
 
 ## Comparison of Accuracy
 
